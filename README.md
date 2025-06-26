@@ -30,8 +30,7 @@ A Python Discord bot that integrates with the HermesAPI to provide real-time Min
    ```
 
 3. **Set up environment variables**:
-   - Copy `env.example` to `.env`
-   - Fill in your configuration values:
+   - Fill in your configuration values in `.env`:
      ```env
      DISCORD_BOT_TOKEN=your_actual_discord_bot_token
      DISCORD_CHANNEL_ID=123456789012345678
