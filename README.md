@@ -152,4 +152,4 @@ Feel free to contribute by:
 
 ## License
 
-This project is provided as-is for educational and personal use. Please respect the licenses of all dependencies and the HermesAPI project. 
+This project is under a MIT license. Additionally respect the licenses of all dependencies and the HermesAPI project. 
