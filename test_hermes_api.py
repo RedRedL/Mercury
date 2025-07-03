@@ -73,10 +73,58 @@ async def test_hermes_api():
                     print(f"   ❌ Failed: HTTP {response.status}")
         except Exception as e:
             print(f"   ❌ Error: {e}")
+        
+        # Test chat send endpoint
+        try:
+            print("💬 Testing /chat/send (POST)...")
+            chat_payload = {
+                'sender': '[Test] Test Bot',
+                'message': 'This is a test message from the API test script'
+            }
+            async with session.post(
+                f"{base_url}/chat/send",
+                headers={**headers, 'Content-Type': 'application/json'},
+                json=chat_payload
+            ) as response:
+                if response.status == 200:
+                    print("   ✅ Success: Chat message sent successfully")
+                elif response.status == 404:
+                    print("   ⚠️  Chat endpoint not found (may not be implemented yet)")
+                else:
+                    print(f"   ❌ Failed: HTTP {response.status}")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
+        
+        # Test chat stream endpoint
+        try:
+            print("💭 Testing /chat/stream (SSE)...")
+            async with session.get(f"{base_url}/chat/stream", headers=headers) as response:
+                if response.status == 200:
+                    content_type = response.headers.get('content-type', '')
+                    if 'text/event-stream' in content_type:
+                        print("   ✅ Success: Chat SSE endpoint is accessible")
+                        
+                        # Read a small amount to test the stream
+                        try:
+                            chunk = await asyncio.wait_for(response.content.read(100), timeout=2.0)
+                            print(f"   📡 Received chat data from stream")
+                        except asyncio.TimeoutError:
+                            print("   ⏱️  No immediate chat data (normal for SSE)")
+                    else:
+                        print(f"   ⚠️  Unexpected content type: {content_type}")
+                elif response.status == 404:
+                    print("   ⚠️  Chat stream endpoint not found (may not be implemented yet)")
+                else:
+                    print(f"   ❌ Failed: HTTP {response.status}")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
     
     print("\n🎯 Test Summary:")
-    print("If all endpoints show ✅, your HermesAPI is working correctly!")
-    print("If you see ❌, check your Minecraft server and HermesAPI installation.")
+    print("✅ = Endpoint working correctly")
+    print("⚠️  = Endpoint may not be implemented yet") 
+    print("❌ = Error or connection issue")
+    print("If you see ❌ for basic endpoints, check your Minecraft server and HermesAPI installation.")
+    print("If you see ⚠️  for chat endpoints, the HermesAPI may not have chat features implemented yet.")
 
 def main():
     """Main test function"""

@@ -33,23 +33,28 @@ class MinecraftBot(commands.Bot):
         # HTTP session for API calls
         self.session: Optional[aiohttp.ClientSession] = None
         
-        # SSE monitoring task
-        self.sse_task: Optional[asyncio.Task] = None
+        # SSE monitoring tasks
+        self.player_events_task: Optional[asyncio.Task] = None
+        self.chat_events_task: Optional[asyncio.Task] = None
         
     async def setup_hook(self):
         """Called when the bot is starting up"""
         # Create HTTP session
         self.session = aiohttp.ClientSession()
         
-        # Start monitoring join/leave events
-        self.sse_task = asyncio.create_task(self.monitor_player_events())
+        # Start monitoring join/leave events and chat messages
+        self.player_events_task = asyncio.create_task(self.monitor_player_events())
+        self.chat_events_task = asyncio.create_task(self.monitor_chat_messages())
         
         logger.info("Bot setup completed")
     
     async def close(self):
         """Clean up when bot shuts down"""
-        if self.sse_task:
-            self.sse_task.cancel()
+        if self.player_events_task:
+            self.player_events_task.cancel()
+        
+        if self.chat_events_task:
+            self.chat_events_task.cancel()
         
         if self.session:
             await self.session.close()
@@ -88,16 +93,44 @@ class MinecraftBot(commands.Bot):
             await self.forward_to_minecraft(message)
     
     async def forward_to_minecraft(self, message):
-        """Forward Discord message to Minecraft server (placeholder for future chat API)"""
-        # Note: Current HermesAPI doesn't have chat endpoints
-        # This is a placeholder for when chat functionality is added
-        logger.info(f"Would forward to Minecraft: [{message.author.display_name}] {message.content}")
-        
-        # For now, we'll just log it and potentially react to show it was "received"
+        """Forward Discord message to Minecraft server via chat API"""
         try:
-            await message.add_reaction("📤")
-        except discord.errors.Forbidden:
-            pass  # Bot doesn't have permission to add reactions
+            headers = {'Content-Type': 'application/json'}
+            if self.hermes_api_key:
+                headers['Authorization'] = f'Bearer {self.hermes_api_key}'
+            
+            # Prepare the chat message payload
+            payload = {
+                'sender': f"[Discord] {message.author.display_name}",
+                'message': message.content
+            }
+            
+            logger.info(f"Forwarding to Minecraft: [{message.author.display_name}] {message.content}")
+            
+            async with self.session.post(
+                f"{self.hermes_base_url}/chat/send",
+                headers=headers,
+                json=payload
+            ) as response:
+                if response.status == 200:
+                    try:
+                        await message.add_reaction("✅")
+                    except discord.errors.Forbidden:
+                        pass  # Bot doesn't have permission to add reactions
+                    logger.info("Message successfully sent to Minecraft")
+                else:
+                    try:
+                        await message.add_reaction("❌")
+                    except discord.errors.Forbidden:
+                        pass
+                    logger.error(f"Failed to send message to Minecraft: HTTP {response.status}")
+                    
+        except Exception as e:
+            logger.error(f"Error forwarding message to Minecraft: {e}")
+            try:
+                await message.add_reaction("❌")
+            except discord.errors.Forbidden:
+                pass
     
     async def forward_from_minecraft(self, player_name: str, chat_message: str):
         """Forward Minecraft chat message to Discord (placeholder for future chat API)"""
@@ -209,6 +242,63 @@ class MinecraftBot(commands.Bot):
                 
         except Exception as e:
             logger.error(f"Error handling player event: {e}")
+
+    async def monitor_chat_messages(self):
+        """Monitor Minecraft chat messages via SSE"""
+        while True:
+            try:
+                headers = {}
+                if self.hermes_api_key:
+                    headers['Authorization'] = f'Bearer {self.hermes_api_key}'
+                
+                logger.info("Connecting to SSE stream for chat messages...")
+                
+                async with sse_client.EventSource(
+                    f"{self.hermes_base_url}/chat/stream",
+                    headers=headers
+                ) as event_source:
+                    async for event in event_source:
+                        if event.data:
+                            await self.handle_chat_event(event.data)
+                        
+            except Exception as e:
+                logger.error(f"Chat SSE connection error: {e}")
+                logger.info("Retrying chat SSE connection in 30 seconds...")
+                await asyncio.sleep(30)
+    
+    async def handle_chat_event(self, event_data: str):
+        """Handle chat messages from SSE stream"""
+        try:
+            channel = self.get_channel(self.channel_id)
+            if not channel:
+                return
+            
+            # Parse the event data (expecting JSON format)
+            try:
+                chat_data = json.loads(event_data)
+                player_name = chat_data.get('player', 'Unknown')
+                message = chat_data.get('message', '')
+                
+                # Don't forward messages that came from Discord (to prevent loops)
+                if message and not player_name.startswith('[Discord]'):
+                    logger.info(f"Received chat from Minecraft: [{player_name}] {message}")
+                    await self.forward_from_minecraft(player_name, message)
+                    
+            except json.JSONDecodeError:
+                # If it's not JSON, try to parse as plain text format
+                # Expected format: "PlayerName: message content"
+                if ':' in event_data:
+                    parts = event_data.split(':', 1)
+                    player_name = parts[0].strip()
+                    message = parts[1].strip()
+                    
+                    # Don't forward messages that came from Discord (to prevent loops)
+                    if message and not player_name.startswith('[Discord]'):
+                        logger.info(f"Received chat from Minecraft: [{player_name}] {message}")
+                        await self.forward_from_minecraft(player_name, message)
+                        
+        except Exception as e:
+            logger.error(f"Error handling chat event: {e}")
 
 # Bot commands
 @commands.command(name='players', aliases=['online', 'who'])
